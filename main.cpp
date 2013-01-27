@@ -3,21 +3,25 @@
 #include <cstdio>
 #include <ctime>
 #include <cmath>
-#include <algorithm> 
+#include <algorithm>
 #include "problem.hpp"
 
 //from paper
-int constraint_x1 = 3; 
+int constraint_x1 = 3;
 int constraint_x2 = 4;
 double crossover_rate = 0.1;
 double mutation_rate = 0.15;
-double replacement_rate = 0.35;
+double replacement_rate = 0.0;              //in paper: table VI, p.5 (Baldwinian evolution)
+int number_of_changes = 10;                 //in paper: table VI, p.5
+int change_frequency = 1000;                //in paper: table VI, p.5
+const int number_of_possibly_feasible = 20; //in paper: table VI, p.5
+const int number_of_feasible = 5;           //in paper: table VI, p.5
 
 //not from paper
 int number_of_problem = 4;
-const int number_of_possibly_feasible = 20;
-const int number_of_feasible = 20;
 int number_of_generations = 1000;
+
+int function_evaluations_counter = 0;       // number of function evaluations so far
 
 struct individual {
     double x1;
@@ -39,9 +43,10 @@ void search();
 void change_generation();
 
 individual repair(individual ind);
-individual selection_feasible(int ranking);
-individual selection_possibly_feasible(int ranking);
-individual crossover(individual parent1, individual parent2);
+individual* selection_feasible(int ranking);
+individual* selection_possibly_feasible(int ranking);
+individual arithmetic_crossover(individual parent1, individual parent2);
+individual uniform_crossover(individual parent1, individual parent2);
 individual mutation(individual parent);
 
 bool is_feasible(individual ind);
@@ -49,7 +54,7 @@ double evaluation(individual ind);
 std::pair<double, double> constraints(individual ind, double t);
 bool compare(individual i,individual j);
 
-double randomize_small_value();
+double randomize_small_value(int);
 double count_time();
 
 void write_population();
@@ -60,11 +65,16 @@ int main() {
     srand(time(NULL));
 	initialize_possibly_feasible();
 	initizalie_feasible();
-	for (int generation; generation < number_of_generations; generation++) {
+	function_evaluations_counter = 0;
+	// function should change every <change_frequency> function evaluations
+	// there should be <number_of_changes> changes of function
+	// hence:
+	while(function_evaluations_counter < number_of_changes * change_frequency)
+    {
 		for (int i = 0; i < number_of_possibly_feasible; i++) {
 			search();
 		}
-		if (generation % 100 == 0) { 
+		if (function_evaluations_counter % 100 == 0) {
 			for (int i = 0; i < number_of_feasible; i++) {
 				change_generation();
 			}
@@ -76,21 +86,21 @@ int main() {
 
 void initialize_possibly_feasible() {
     for (int i = 0; i < number_of_possibly_feasible; i++) {
-		individuals.possibly_feasible[i].x1 = randomize_small_value() * constraint_x1;
-		individuals.possibly_feasible[i].x2 = randomize_small_value() * constraint_x2;
+		individuals.possibly_feasible[i].x1 = randomize_small_value(constraint_x1);
+		individuals.possibly_feasible[i].x2 = randomize_small_value(constraint_x2);
 		individuals.possibly_feasible[i].fitness = evaluation(individuals.possibly_feasible[i]);
-	}    
+	}
 }
 
 void initizalie_feasible() {
     for (int i = 0; i < number_of_feasible; i++) {
 		individual ind;
-		ind.x1 = randomize_small_value() * constraint_x1;
-		ind.x2 = randomize_small_value() * constraint_x2;
+		ind.x1 = randomize_small_value(constraint_x1);
+		ind.x2 = randomize_small_value(constraint_x2);
 		ind.fitness = evaluation(ind);
 		while (!is_feasible(ind)) {
-			ind.x1 = randomize_small_value() * constraint_x1;
-			ind.x2 = randomize_small_value() * constraint_x2;
+			ind.x1 = randomize_small_value(constraint_x1);
+			ind.x2 = randomize_small_value(constraint_x2);
 			ind.fitness = evaluation(ind);
 		}
 		individuals.feasible[i] = ind;
@@ -98,55 +108,74 @@ void initizalie_feasible() {
 }
 
 void search() {
-	double p1 = randomize_small_value();
-	double p2 = randomize_small_value();
+	double p1 = randomize_small_value(1);
+	double p2 = randomize_small_value(1);
 	individual child;
 	if (p1 < crossover_rate) {
-		individual parent1 = selection_possibly_feasible(number_of_possibly_feasible - 1);
-		individual parent2 = selection_possibly_feasible(number_of_possibly_feasible - 2);
-		child = crossover(parent1, parent2);
+	    //TODO: nonlinear ranking + should choose one of the worst, not the worst
+		individual parent1 = *selection_possibly_feasible(number_of_possibly_feasible - 1);
+		individual parent2 = *selection_possibly_feasible(number_of_possibly_feasible - 2);  //TODO: nonlinear ranking
+		child = uniform_crossover(parent1, parent2);
+        child.fitness = evaluation(child);
+        child = repair(child);
+        individual *worst = selection_possibly_feasible(0);  //TODO: replace ONE OF the worst, not the worst + nonlinear ranking
+        *worst = child;      // does it work?
 	}
 	if (p2 < mutation_rate) {
-		individual parent = selection_possibly_feasible(number_of_possibly_feasible - 1);
+		individual parent = *selection_possibly_feasible(number_of_possibly_feasible - 1);   //TODO: nonlinear ranking
 		child = mutation(parent);
+        child.fitness = evaluation(child);
+        ichild = repair(child);
+        individual *worst = selection_possibly_feasible(0);  //TODO: replace ONE OF the worst, not the worst + nonlinear ranking
+        *worst = child;      // does it work?
 	}
 	if (p1 >= crossover_rate && p2 >= mutation_rate) {
-		child = selection_possibly_feasible(number_of_possibly_feasible - 1);
+		child = *selection_possibly_feasible(number_of_possibly_feasible - 1);   //TODO: nonlinear ranking
+		//TODO: check if child hasn't been evaluated since the last generation
+		child.fitness = evaluation(child);
+        child = repair(child);
+        individual *worst = selection_possibly_feasible(0);  //TODO: replace ONE OF the worst, not the worst + nonlinear ranking
+        *worst = child; // does it work?
 	}
-	child.fitness = evaluation(child);
-	child = repair(child);
-	individual worst = selection_possibly_feasible(0);
-	worst = child;
 }
 
 void change_generation() {
-	for (int i = 0; i < number_of_feasible; i++) {
-		if (randomize_small_value() < crossover_rate) {
-			individual parent1 = selection_feasible(number_of_feasible - 1);
-			individual parent2 = selection_feasible(number_of_feasible - 2);
-			individual child = crossover(parent1, parent2);
-			if (is_feasible(child)) {
-				child.fitness = evaluation(child);
-				parent1.fitness = evaluation(parent1);
-				if (child.fitness > parent1.fitness) {
-					parent1 = child;
-					parent1.fitness = child.fitness;
-				}
-			}
-		}
-		if (randomize_small_value() < mutation_rate) {
-			individual parent = selection_feasible(number_of_feasible - 1);
-			individual child = mutation(parent);
-			if (is_feasible(child)) {
-				child.fitness = evaluation(child);
-				parent.fitness = evaluation(parent);
-					if (child.fitness > parent.fitness) {
-					parent = child;
-					parent.fitness = child.fitness;
-				}
-			}
-		}
-	}
+	//for (int i = 0; i < number_of_feasible; i++) {    this loop is already in main function
+    if (randomize_small_value(1) < crossover_rate) {
+        individual parent1 = *selection_feasible(number_of_feasible - 1);    //TODO: nonlinear ranking
+        individual parent2 = *selection_feasible(number_of_feasible - 2);    //TODO: nonlinear ranking
+        individual child = uniform_crossover(parent1, parent2);
+        if (is_feasible(child)) {
+            child.fitness = evaluation(child);
+            //from paper: "evaluate r and x, the better of the two parents"
+            parent1.fitness = evaluation(parent1);  //don't know if it's necessary. maybe fitness value is up to date
+            parent2.fitness = evaluation(parent2);
+            individual *better_parent;
+            if(parent1.fitness > parent2.fitness) {
+                better_parent = &parent1;
+            }
+            else {
+                better_parent = &parent2;
+            }
+            //parent1.fitness = evaluation(parent1);
+            if (child.fitness > (*better_parent).fitness) {
+                *better_parent = child;
+                //better_parent.fitness = child.fitness;   not necessary
+            }
+        }
+    }
+    if (randomize_small_value(1) < mutation_rate) {
+        individual parent = *selection_feasible(number_of_feasible - 1);
+        individual child = mutation(parent);
+        if (is_feasible(child)) {
+            child.fitness = evaluation(child);
+            parent.fitness = evaluation(parent);
+                if (child.fitness > parent.fitness) {
+                parent = child;
+                //parent.fitness = child.fitness;   //not necessary
+            }
+        }
+    }
 }
 
 individual repair(individual ind) {
@@ -154,7 +183,7 @@ individual repair(individual ind) {
 	individual repaired;
 	int iter = 0; //number_of_trials = 100 in paper
 	do {
-		double p = randomize_small_value();
+		double p = randomize_small_value(1);
 		repaired.x1 = p * ind.x1 + (1 - p) * individuals.feasible[random_feasible_index].x1; //linear interpolation
 		repaired.x2 = p * ind.x2 + (1 - p) * individuals.feasible[random_feasible_index].x2; //linear interpolation
 		iter++;
@@ -170,15 +199,15 @@ individual repair(individual ind) {
 	return ind;
 }
 
-individual selection_feasible(int ranking) { //linear selection unfortunetly
+individual* selection_feasible(int ranking) { //linear selection unfortunetly
 	std::sort(individuals.feasible, individuals.feasible + number_of_feasible, compare);
-	return individuals.feasible[ranking];
+	return &individuals.feasible[ranking];
 }
-individual selection_possibly_feasible(int ranking) { //linear selection unfortunetly
+individual* selection_possibly_feasible(int ranking) { //linear selection unfortunetly
 	std::sort(individuals.feasible, individuals.possibly_feasible + number_of_possibly_feasible, compare);
-	return individuals.possibly_feasible[ranking];
+	return &individuals.possibly_feasible[ranking];
 }
-individual crossover(individual parent1, individual parent2) { //arithmetic crossover
+individual arithmetic_crossover(individual parent1, individual parent2) {
 	individual child;
 	child.x1 = parent1.x1 + parent2.x1;
 	child.x2 = parent1.x2 + parent2.x2;
@@ -186,33 +215,63 @@ individual crossover(individual parent1, individual parent2) { //arithmetic cros
 	return child;
 }
 
+individual uniform_crossover(individual parent1, individual parent2) { //in paper
+	individual child;
+
+	if(rand() % 2 == 0)
+        child.x1 = parent1.x1;
+    else
+        child.x1 = parent2.x1;
+
+    if(rand() % 2 == 0)
+        child.x2 = parent1.x2;
+    else
+        child.x2 = parent2.x2;
+
+	return child;
+}
+
 individual mutation(individual parent) {
 	individual child;
 	child.x1 = parent.x1;
 	child.x2 = parent.x2;
-	int random_gen = rand() % 2;
-	
-	if (random_gen == 0) child.x1 = randomize_small_value() * constraint_x1;
-	else child.x2 = randomize_small_value() * constraint_x2;
-	
-	child.fitness = evaluation(child);
+	//int random_gen = rand() % 2;
+
+	int small_value1 = randomize_small_value(1);
+	int small_value2 = randomize_small_value(1);
+
+	if(rand() % 2 == 0)
+        child.x1 += small_value1;
+    else
+        child.x1 -= small_value1;
+
+    if(rand() % 2 == 0)
+        child.x2 += small_value2;
+    else
+        child.x2 -= small_value2;
+
+	//if (random_gen == 0) child.x1 = randomize_small_value() * constraint_x1;
+	//else child.x2 = randomize_small_value() * constraint_x2;
+
 	return child;
 }
 
 double evaluation(individual ind) {
-	double t = count_time();
+    function_evaluations_counter++;     // should be increased with each function evaluation
+	int t = function_evaluations_counter / change_frequency;    // t is increased every <change_frequency> function evaluations
 	return dynamic_p1(number_of_problem, t) * (ind.x1 + dynamic_q1(number_of_problem, t)) +
 			dynamic_p2(number_of_problem, t) * (ind.x2 + dynamic_q2(number_of_problem, t));
-} 
+}
 
 bool is_feasible(individual ind) {
-	double t = count_time();
+	//double t = count_time();
+	int t = function_evaluations_counter / change_frequency;
 	std::pair<double, double> pair_of_constraints = constraints(ind, t);
 	return (pair_of_constraints.first <= 0 && pair_of_constraints.second <= 0);
 }
 
 
-std::pair<double, double> constraints(individual ind, double t) {	
+std::pair<double, double> constraints(individual ind, double t) {
 	double y1 = dynamic_r1(number_of_problem, t) * (ind.x1 + dynamic_s1(number_of_problem, t));
 	double y2 = dynamic_r2(number_of_problem, t) * (ind.x2 + dynamic_s2(number_of_problem, t));
 	switch (number_of_problem) { //some of the problems don't have contraints, some have only one
@@ -221,16 +280,17 @@ std::pair<double, double> constraints(individual ind, double t) {
 	return std::make_pair(0, 0);
 }
 
-double randomize_small_value() {
-	return 1.0 / (rand() % 100);
+double randomize_small_value(int not_bigger_than) {
+	//return 1.0 / (rand() % 100);    could be divided by zero
+	return (rand() % (not_bigger_than * 100)) * 0.01;
 }
 
-double count_time() {
-	return ((int) time(NULL)) % 100;
-}
+//double count_time() {
+//	return ((int) time(NULL)) % 100;
+//}
 
-bool compare(individual i,individual j) { 
-	return (i.fitness < j.fitness); 
+bool compare(individual i,individual j) {
+	return (i.fitness < j.fitness);
 }
 
 void write_population() {
@@ -240,7 +300,7 @@ void write_population() {
 	}
 	printf("Feasible\n");
 	for (int i = 0; i < number_of_feasible; i++) {
-		printf("\t%lf %lf fitness %lf\n", individuals.feasible[i].x1, individuals.feasible[i].x2, individuals.feasible[i].fitness);	
+		printf("\t%lf %lf fitness %lf\n", individuals.feasible[i].x1, individuals.feasible[i].x2, individuals.feasible[i].fitness);
 	}
 	printf("End of population \n \n");
 }
